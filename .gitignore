@@ -21,3 +21,10 @@ __pycache__/
 components/
 .components_*
 *.log
+
+# Generated synthetic renders
+/test_outputs/
+/output_figures/simulated_run/
+/output_figures/demo/
+/output_figures/preview/
+/Rplots.pdf

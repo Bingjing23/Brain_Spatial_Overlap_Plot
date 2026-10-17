@@ -1,45 +1,36 @@
 #!/bin/bash
-# ==============================================================================
-# Execution script for render_manuscript_spatial.R
-# Uses Bingjing's EXACT manuscript spatial rendering pipeline with simulated data.
-# ==============================================================================
+# Render manuscript spatial figures from an atlas-matched counts table.
+# Inputs: COUNTS, PALETTE, ATLAS_DIR, OUTCOME_ID environment variables.
+# Outputs: composite, panel, and trait figures under OUTPUT_DIR.
+# Run: ATLAS_DIR=/path/to/atlas bash run_render.sh
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "${SCRIPT_DIR}"
-
-COUNTS="${SCRIPT_DIR}/example_data/simulated_probe_domain_counts.tsv.gz"
-OUTPUT="${SCRIPT_DIR}/output_figures/simulated_run"
-PALETTE="${SCRIPT_DIR}/config/trait_palette.tsv"
-
-# brainMapR atlas directory containing coordinate text files
-# Default QIMR HPC path or user-specified ATLAS_DIR
-ATLAS="${ATLAS_DIR:-/mnt/lustre/working/lab_puyag/bingjinZ/Side_Project_AD/software/Rlibs/brainMapR-076069ce/brainMapR/extdata/atlas}"
+COUNTS="${COUNTS:-${SCRIPT_DIR}/example_data/simulated_probe_domain_counts.tsv.gz}"
+OUTPUT="${OUTPUT_DIR:-${SCRIPT_DIR}/output_figures/simulated_run}"
+PALETTE="${PALETTE:-${SCRIPT_DIR}/config/trait_palette.tsv}"
+OUTCOME_ID="${OUTCOME_ID:-Simulated_Trait_Overlap}"
+ATLAS="${ATLAS_DIR:-/working/lab_puyag/bingjinZ/Side_Project_AD/software/Rlibs/brainMapR-076069ce/brainMapR/extdata/atlas}"
 
 mkdir -p "${OUTPUT}"
+echo "Counts input: ${COUNTS}"
+echo "Atlas dir: ${ATLAS}"
+echo "Output dir: ${OUTPUT}"
 
-echo "Starting manuscript spatial rendering pipeline..."
-echo "  Counts input : ${COUNTS}"
-echo "  Atlas dir    : ${ATLAS}"
-echo "  Output dir   : ${OUTPUT}"
-
-# Set option for binary domain alternative if desired:
-# export BINARY_DOMAIN_ALTERNATIVE=true
-
-CMD="Rscript render_manuscript_spatial.R \
-  --counts \"${COUNTS}\" \
-  --outcome-id \"Simulated_Trait_Overlap\" \
-  --atlas-dir \"${ATLAS}\" \
-  --palette \"${PALETTE}\" \
-  --output-dir \"${OUTPUT}\""
+render_command=(
+  Rscript "${SCRIPT_DIR}/render_manuscript_spatial.R"
+  --counts "${COUNTS}"
+  --outcome-id "${OUTCOME_ID}"
+  --atlas-dir "${ATLAS}"
+  --palette "${PALETTE}"
+  --output-dir "${OUTPUT}"
+)
 
 if command -v xvfb-run >/dev/null 2>&1; then
-  echo "Executing with virtual X11 server (xvfb-run)..."
-  xvfb-run -a ${CMD}
+  xvfb-run -a "${render_command[@]}"
 else
-  echo "Executing Rscript directly..."
-  ${CMD}
+  "${render_command[@]}"
 fi
 
-echo "Done! Outputs generated under: ${OUTPUT}"
+echo "Figures generated under: ${OUTPUT}"

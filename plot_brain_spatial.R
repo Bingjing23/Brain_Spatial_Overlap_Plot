@@ -31,6 +31,7 @@ get_script_dir <- function() {
 script_dir <- get_script_dir()
 source(file.path(script_dir, "lib/figure_style.R"))
 source(file.path(script_dir, "lib/brain_render_engine.R"))
+source(file.path(script_dir, "lib/subcortical_coordinates.R"))
 
 # Main R Function Interface
 render_brain_spatial <- function(
@@ -137,7 +138,9 @@ render_brain_spatial <- function(
       if (!file.exists(atlas_file)) stop("Missing cortical atlas file: ", atlas_file)
       atlas_c <- fread(atlas_file, showProgress = FALSE)
       setnames(atlas_c, "vertexID", "Probe")
+      atlas_c <- unique(atlas_c, by = "Probe")
       coords_merged <- merge(sub_dt, atlas_c, by = "Probe")
+      if (nrow(coords_merged) != nrow(sub_dt)) stop("Cortical Probe IDs do not match the atlas")
       
       cols_xyz <- paste(c("Y", "X", "Z"), surface, sep = "_")
       if (!all(cols_xyz %in% names(coords_merged))) {
@@ -174,14 +177,11 @@ render_brain_spatial <- function(
     } else {
       # Subcortical
       if (is.null(subcortical_atlas)) stop("Subcortical atlas file not found.")
-      coords_merged <- merge(sub_dt, subcortical_atlas, by = "Probe")
+      coords_merged <- merge(sub_dt, subcortical_atlas[hemi == hemi_curr & moda == moda_curr], by = "Probe")
+      if (nrow(coords_merged) != nrow(sub_dt)) stop("Subcortical Probe IDs do not match the atlas")
       coords_merged[, `:=`(X = -X, Y = -Y)]
       
-      if (requireNamespace("brainMapR", quietly = TRUE)) {
-        coords_merged <- as.data.table(brainMapR::addFlatCoordinatesSubcortical(annotBwas = coords_merged, hemi = hemi_curr))
-      } else {
-        coords_merged[, `:=`(Zf = Z, Xf = X, Yf = Y, Zf2 = Z, Xf2 = X, Yf2 = Y)]
-      }
+      coords_merged <- add_flat_coordinates_subcortical(coords_merged, hemi_curr)
       
       for (view in c("inside", "outside")) {
         cols_xyz <- if (view == "inside") c("Zf", "Xf", "Yf") else c("Zf2", "Xf2", "Yf2")
@@ -321,7 +321,7 @@ if (sys.nframe() == 0L) {
     )
     i <- 1L
     while (i <= length(args)) {
-      key <- sub("^--", "", gsub("-", "_", args[i]))
+      key <- gsub("-", "_", sub("^--", "", args[i]))
       if (key %in% keys) {
         res[[key]] <- args[i + 1L]
         i <- i + 2L

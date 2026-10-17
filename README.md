@@ -47,6 +47,8 @@ Input tables must be formatted as gzip-compressed tab-separated values (`.tsv.gz
 | `<trait_id>` | Integer / Logical | `0`, `1` (or `TRUE`, `FALSE`) | Binary indicator of concordant significance for each trait. |
 | `all_same` *(optional)* | Integer | $\ge 0$ | Total number of overlapping traits at the vertex. Computed automatically if omitted. |
 
+The bundled domain example uses nonnegative counts within each domain, so its `all_same` can exceed the number of palette rows. For count-valued columns, provide `all_same` explicitly as the sum of those counts. Automatic calculation counts positive columns and is suitable for binary trait indicators.
+
 ### Data Preparation Snippet (R / `data.table`)
 
 ```R
@@ -87,6 +89,10 @@ anx	Anxiety	#23847B	4
 
 ## 4. Execution
 
+The main renderer needs the `data.table`, `ggplot2`, `gridExtra`, `png`, `RColorBrewer`, and `rgl` R packages, plus the brainMapR atlas files. The `brainMapR` R package is not required.
+The bundled `simulated_probe_domain_counts.tsv.gz` has 653,994 atlas-matched synthetic rows. The separate `example_overlap_data.tsv.gz` uses placeholder Probe IDs and cannot be joined to the atlas.
+On QIMR, submit full rendering through PBS. The tested `R/4.3.1` module includes the rendering packages.
+
 ### Shell Runner
 
 ```bash
@@ -105,18 +111,32 @@ Rscript render_manuscript_spatial.R \
   --output-dir "output_figures/run_01"
 ```
 
+### Manuscript-density synthetic render
+
+The default `RENDER_POINTS_PER_GROUP=0` draws every atlas-matched vertex. The bundled example has 149,953 left and 149,924 right vertices for each cortical modality, and 13,560 vertices per subcortical modality and hemisphere. The grey background sphere radius is 0.95, matching the manuscript script. Submit the full render to PBS on QIMR.
+
+```bash
+RENDER_POINTS_PER_GROUP=0 RENDER_SUPPLEMENTS=false \
+  OUTCOME_ID=Simulated_Preview \
+  OUTPUT_DIR=output_figures/preview \
+  ATLAS_DIR=/path/to/brainMapR/extdata/atlas \
+  bash run_render.sh
+```
+
+`RENDER_SUPPLEMENTS=false` limits this example to the main count and trait-identity panels. Leave it unset for all supplementary trait maps. For a quick input and layout check, `RENDER_POINTS_PER_GROUP=8000` is available, but its sparse cortex is not visually comparable with the manuscript.
+
 ### HPC Cluster Job Submission (PBS / QIMR `hpcapp01`)
 
 ```bash
 #!/bin/bash
 #PBS -N brain_spatial_render
 #PBS -l select=1:ncpus=1:mem=24gb
-#PBS -l walltime=02:00:00
+#PBS -l walltime=04:00:00
 #PBS -j oe
 
 set -euo pipefail
 module purge
-module load R/4.5.0 ImageMagick/7.1.1-11
+module load R/4.3.1 ImageMagick/7.1.1-11
 
 cd "${PBS_O_WORKDIR:-.}"
 
@@ -132,7 +152,7 @@ bash run_render.sh
 The rendering pipeline exports publication-ready composites and modular sub-panels in both vector PDF (`cairo_pdf`) and 500 DPI PNG formats:
 
 - `Main_<outcome>_count_and_trait.png` / `.pdf`: Complete two-panel composite figure.
-  - **Panel a**: Trait overlap count ladder (1, 2, 3, 4+ concordant traits).
+  - **Panel a**: Trait overlap count ladder (all observed positive counts).
   - **Panel b**: Trait identity map (trait-specific colors + multi-trait dark grey).
 - `Panel_<outcome>_trait_count.png` / `.pdf`: Standalone Panel a.
 - `Panel_<outcome>_trait_identity.png` / `.pdf`: Standalone Panel b.

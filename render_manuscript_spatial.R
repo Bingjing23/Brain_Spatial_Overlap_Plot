@@ -5,7 +5,6 @@
 # the approved opaque point-sphere style for all cortical/subcortical panels.
 
 suppressPackageStartupMessages({
-  library(brainMapR)
   library(data.table)
   library(ggplot2)
   library(grid)
@@ -25,6 +24,7 @@ get_script_dir <- function() {
 }
 script_dir <- get_script_dir()
 source(file.path(script_dir, "lib/manuscript_figure_style.R"))
+source(file.path(script_dir, "lib/subcortical_coordinates.R"))
 
 parse_args <- function(x) {
   required_keys <- c("counts", "outcome_id", "atlas_dir", "output_dir")
@@ -61,7 +61,7 @@ style <- "inflated_pre"
 
 # Neutral background vertices (outlines full brain anatomy for all non-significant probes):
 background_colour   <- "#D0D0D0" # Neutral light grey
-background_radius   <- 0.95      # Point sphere radius (smaller for dense cortical mesh)
+background_radius   <- 0.95      # Manuscript radius for the full cortical vertex inventory
 
 # Outcome FDR-significant vertices with zero overlapping traits:
 outcome_only_colour <- "#D7BE88" # Neutral beige (distinguishes disease effect from trait overlap)
@@ -182,7 +182,10 @@ prepare_cortical <- function(modality_id, hemisphere_id) {
   )
   atlas <- fread(atlas_file, showProgress = FALSE)
   setnames(atlas, "vertexID", "Probe")
-  x <- merge(counts[moda == modality_id & hemi == hemisphere_id], atlas, by = "Probe")
+  atlas <- unique(atlas, by = "Probe")
+  expected <- counts[moda == modality_id & hemi == hemisphere_id]
+  x <- merge(expected, atlas, by = "Probe")
+  if (nrow(x) != nrow(expected)) stop("Cortical Probe IDs do not match the atlas")
   if (!nrow(x)) stop("Empty cortical annotation")
   setorder(x, order)
   x
@@ -190,10 +193,13 @@ prepare_cortical <- function(modality_id, hemisphere_id) {
 prepare_subcortical <- function(modality_id, hemisphere_id) {
   atlas <- fread(file.path(opt$atlas_dir, "Atlas_coordinates_ROI_subortical.txt"), showProgress = FALSE)
   setnames(atlas, "ProbeID", "Probe")
-  x <- merge(counts[moda == modality_id & hemi == hemisphere_id], atlas, by = "Probe")
+  atlas <- atlas[moda == modality_id & hemi == hemisphere_id]
+  expected <- counts[moda == modality_id & hemi == hemisphere_id]
+  x <- merge(expected, atlas, by = "Probe")
+  if (nrow(x) != nrow(expected)) stop("Subcortical Probe IDs do not match the atlas")
   if (!nrow(x)) stop("Empty subcortical annotation")
   x[, `:=`(X = -X, Y = -Y)]
-  as.data.table(brainMapR::addFlatCoordinatesSubcortical(annotBwas = x, hemi = hemisphere_id))
+  add_flat_coordinates_subcortical(x, hemisphere_id)
 }
 prepared <- list()
 for (modality_id in names(modality_labels)) {
@@ -210,6 +216,20 @@ for (modality_id in names(modality_labels)) {
 # ==============================================================================
 # 🗺️ 4. MAP SPECIFICATIONS (Trait Count & Trait Identity)
 # ==============================================================================
+render_points_per_group <- suppressWarnings(as.integer(Sys.getenv("RENDER_POINTS_PER_GROUP", "0")))
+if (is.na(render_points_per_group) || render_points_per_group < 0L) stop("Invalid RENDER_POINTS_PER_GROUP")
+if (render_points_per_group > 0L) {
+  cortical_group_sizes <- vapply(prepared[grepl("^(thickness|area)_", names(prepared))], nrow, integer(1L))
+  if (any(render_points_per_group < cortical_group_sizes / 4L)) {
+    warning("Sparse cortical preview: sampling fewer than 25% of vertices can leave visible gaps. ",
+            "Increase RENDER_POINTS_PER_GROUP or use 0 for manuscript density.")
+  }
+  set.seed(20261018L)
+  prepared <- lapply(prepared, function(x) {
+    x[sample.int(nrow(x), min(nrow(x), render_points_per_group))]
+  })
+  message("Preview rendering with at most ", render_points_per_group, " vertices per modality/hemisphere")
+}
 map_specs <- list(
   count = list(
     label = "Concordant trait overlap count", kind = "numeric", value = "all_same"
@@ -389,7 +409,8 @@ coordinates_for <- function(x, modality_id, view) {
 
 map_spec_filter <- Sys.getenv("MAP_SPEC_FILTER", "")
 component_only <- tolower(Sys.getenv("COMPONENT_ONLY", "false")) == "true"
-render_map_ids <- names(map_specs)
+render_supplements <- tolower(Sys.getenv("RENDER_SUPPLEMENTS", "true")) == "true"
+render_map_ids <- if (render_supplements) names(map_specs) else c("count", "trait_identity")
 if (nzchar(map_spec_filter)) {
   requested <- strsplit(map_spec_filter, ",", fixed = TRUE)[[1L]]
   if (any(!requested %in% names(map_specs))) {
@@ -807,12 +828,14 @@ save_grob(
 )
 
 # 3. Individual trait supplementary figures
-for (trait_id in traits) {
-  t_panel <- make_panel(paste0("trait_", trait_id), trait_labels[[trait_id]])
-  save_grob(
-    t_panel, paste0("Supplement_", safe_id, "_", trait_id, "_overlap"),
-    width = 14.4, height = 3.8
-  )
+if (render_supplements) {
+  for (trait_id in traits) {
+    t_panel <- make_panel(paste0("trait_", trait_id), trait_labels[[trait_id]])
+    save_grob(
+      t_panel, paste0("Supplement_", safe_id, "_", trait_id, "_overlap"),
+      width = 14.4, height = 3.8
+    )
+  }
 }
 
 # 4. Detailed captions and parameter summaries
@@ -825,15 +848,18 @@ caption <- c(
   sprintf("Background point radius is %.2f; outcome/trait points use radius %.2f.", background_radius, significant_radius),
   "Horizontal layout orders left/right CT, left/right SA, left/right subcortical thickness, and left/right subcortical Log-Jacobian across 8 columns."
 )
+if (render_points_per_group > 0L) {
+  caption <- c(caption, sprintf("Preview only: at most %d vertices were sampled per modality and hemisphere for display.", render_points_per_group))
+}
 writeLines(caption, file.path(opt$output_dir, paste0("Main_", safe_id, "_caption.txt")))
 
 fwrite(data.table(
   setting = c("surface", "background_radius", "significant_radius", "alpha",
               "background_colour", "outcome_only_colour", "multi_trait_colour",
-              "max_overlapping_traits", "trait_count"),
+              "max_overlapping_traits", "trait_count", "render_points_per_group", "supplements_rendered"),
   value = c(style, background_radius, significant_radius, point_alpha,
             background_colour, outcome_only_colour, multi_trait_colour,
-            max(counts$all_same), length(traits))
+            max(counts$all_same), length(traits), render_points_per_group, render_supplements)
 ), file.path(opt$output_dir, "RENDERING_PARAMETERS.tsv"), sep = "\t")
 
 writeLines(capture.output(sessionInfo()), file.path(opt$output_dir, "sessionInfo.txt"))

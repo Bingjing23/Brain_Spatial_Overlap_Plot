@@ -1,0 +1,23 @@
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# R / RGL caches
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj.user
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Temporary components generated during rendering
+components/
+.components_*
+*.log
